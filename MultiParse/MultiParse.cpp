@@ -1,31 +1,14 @@
 //Multithreaded parsing variation on original.  Opens and searches file.  Outputs matching search lines to an output file.
 
-#include <iostream>
-#include <fstream>
-#include <ctime>
-#include <thread>
-//#include "mThread.h"
-
-const int MAX_SEARCH = 100; //Maximum length of search term
-const int MAX_STRLENGTH = 500; //Maximum line length for one line in file
-const bool LOGGING = true; //Verbose logging on or off
-const int MAX_THREADS = 4;
-const bool VERBOSE = true;
-
-void Extract(char searchString[], int & numMatches); //main parsing program
-//void Export(char exportLine[], std::ofstream & exporter); //writes out matches to output.txt
-void checkMatch(char searchTerm[], char toBeSearched[], bool& match); //Returns true if searchTerm is somewhere in toBeSearched
-void readIn(char myStrings[], std::ifstream& reader); //reads lines into different strings for searching later.
-void writeOut(char myStrings[], std::ofstream& writer, bool matches[], int& numMatches); //looks at matches and writes matching lines to output.
-void test(int test1[], int test2); //testing
-void Clean(char toClean[], int strLength);
+#include "mThread.h"
+#include "Header.h"
 
 int main()
 {
 	char searchPhrase[MAX_SEARCH];
 	int numMatches = 0;
 
-	//start GUI
+	//TODO:start GUI
 
 	std::cout << "Enter phrase for extraction: ";
 	std::cin.width(MAX_SEARCH);
@@ -46,7 +29,7 @@ int main()
 
 	std::cin.ignore(100, '\n');
 
-	//Close GUI
+	//TODO:Close GUI
 
 
 	return 0;
@@ -65,23 +48,28 @@ void Extract(char searchString[], int & numMatches) {
 
 	std::ifstream parser;
 	std::ofstream writer;
-	std::thread myThreads[MAX_THREADS];
+	//std::thread myThreads[MAX_THREADS];
 	//char currLines[2][MAX_THREADS][MAX_STRLENGTH];
-	char allLines[2 * MAX_THREADS * MAX_STRLENGTH];
-	bool isMatch[2 * MAX_THREADS];
-	bool switcher = false;
-	bool isOver = false;
+	//char allLines[2 * MAX_THREADS * MAX_STRLENGTH];
+	char buffArray[MAX_THREADS * MAX_STRLENGTH];
+	//bool isMatch[2 * MAX_THREADS];
+	//bool switcher = false;
+	//bool isOver = false;
+	ThreadManager mManager;
+
+	Clean(buffArray, MAX_THREADS * MAX_STRLENGTH);
 
 
 	parser.open("File.csv");
 	writer.open("output.csv");
 
 	if (parser.is_open())
-		//readIn(currLines[int(switcher)], parser);
-		readIn(&allLines[int(switcher) * MAX_STRLENGTH * MAX_THREADS], parser);
+		for (int i = 0; i < MAX_THREADS; ++i)
+			readIn(&buffArray[MAX_STRLENGTH * i], parser);
 	else
 		if (LOGGING) std::cout << "failed to open input file" << std::endl;
 
+	/*
 	while (!isOver) 
 	{
 		if (!parser || parser.eof()) 
@@ -89,18 +77,13 @@ void Extract(char searchString[], int & numMatches) {
 
 		for (int i = 0; i < MAX_THREADS; i++) //create 4 threads and start executing comparisons
 		{
-			//myThreads[i] = std::thread(checkMatch, searchString, currLines[int(switcher)][i], isMatch[int(switcher)][i]);
-			//curpos = &allLines[int(switcher) * MAX_STRLENGTH * MAX_THREADS + MAX_STRLENGTH * MAX_THREADS];
-
 			myThreads[i] = std::thread(
 				checkMatch,
 				searchString,
 				&allLines[int(switcher) * MAX_STRLENGTH * MAX_THREADS + MAX_STRLENGTH * i], 
-				//curpos,
 				std::ref(isMatch[int(switcher) * MAX_THREADS + i]));
 		}
 
-		//readIn(currLines[int(!switcher)], parser);
 		readIn(&allLines[int(!switcher) * MAX_STRLENGTH * MAX_THREADS], parser);
 
 		for (int i = 0; i < MAX_THREADS; i++) //join all of the threads.
@@ -114,15 +97,39 @@ void Extract(char searchString[], int & numMatches) {
 
 		switcher = !switcher; //switch the 4 arrays being used.
 	}
+	*/
 
+	//TODO: Start thread manager
+	//while thread manager is running, while loop to check for thread updates needed
+	//once thread manager finishes, close the threads
+	mManager.Start(searchString, buffArray);
 
-	//cleanup
-	//for (int i = 0; i < MAX_THREADS; i++)
-	//	delete myThreads[i];
+	for (int i = 0; i < MAX_THREADS; ++i)
+		readIn(&buffArray[MAX_STRLENGTH * i], parser);
+
+	while (parser && !parser.eof())
+	{
+		bool matched;
+
+		for (int i = 0; i < MAX_THREADS; ++i)
+		{
+			if (mManager.needsQueue[i])
+			{
+				//matched = mManager.matches[i];
+				if (mManager.matches[i])
+					mManager.Write(i, writer, numMatches);
+				mManager.reQueue(buffArray, i);//reset flag on thread and enter next string for processing
+				//if(matched)
+				//	writeOut(&buffArray[MAX_STRLENGTH * i], writer, numMatches);
+				readIn(&buffArray[MAX_STRLENGTH * i], parser);
+			}			
+		}
+	}
+
+	mManager.CloseAll();
+
 	parser.close();
 	writer.close();
-
-
 }
 
 void Clean(char toClean[], int strLength)
@@ -131,13 +138,13 @@ void Clean(char toClean[], int strLength)
 		toClean[i] = '\0';
 }
 
-void readIn(char myStrings[], std::ifstream& reader)
+void readIn(char myString[], std::ifstream& reader)
 {
-	Clean(myStrings, MAX_STRLENGTH * MAX_THREADS);
+	Clean(myString, MAX_STRLENGTH);
 
-	for (int i = 0; i < MAX_THREADS; i++) 
-	{
-		reader.get(&myStrings[MAX_STRLENGTH * i], MAX_STRLENGTH, '\n');
+	//for (int i = 0; i < MAX_THREADS; i++) 
+	//{
+		reader.get(myString, MAX_STRLENGTH, '\n');
 		reader.ignore();
 
 		while (reader.fail() && !reader.eof()) //repeat until successful read or until eof is reached.
@@ -146,20 +153,20 @@ void readIn(char myStrings[], std::ifstream& reader)
 			else if (LOGGING) std::cout << "line was empty" << '\n';
 			reader.clear(); //clear failure
 			reader.ignore(); //ignore newline
-			reader.get(&myStrings[MAX_STRLENGTH * i], MAX_STRLENGTH, '\n'); //read another line into that array.
+			reader.get(myString, MAX_STRLENGTH, '\n'); //read another line into that array.
 			reader.ignore();
 		}
 		if (VERBOSE) {
 			char temp[MAX_STRLENGTH];
-			strcpy_s(temp, MAX_STRLENGTH, &myStrings[MAX_STRLENGTH * i]);
+			strcpy_s(temp, MAX_STRLENGTH, myString);
 			std::cout << "Line read: " << temp << '\n';
 		}
-	}
+	//}
 
 }
 
 //writes out the result of the search to the output file in order of the searches.
-void writeOut(char myStrings[], std::ofstream& writer, bool matches[], int& numMatches)
+/*void writeOut(char myStrings[], std::ofstream& writer, bool matches[], int& numMatches)
 {
 	char temp[MAX_STRLENGTH];
 
@@ -174,14 +181,22 @@ void writeOut(char myStrings[], std::ofstream& writer, bool matches[], int& numM
 		}
 	}
 
+}*/
+
+void writeOut(char myString[], std::ofstream& writer, int& numMatches) 
+{
+	char temp[MAX_STRLENGTH];
+	strcpy_s(temp, MAX_STRLENGTH, myString);
+	writer << temp << '\n';
+	numMatches++;
 }
 
 //Returns true if there is a match between the searchterm and the line to be searched.
-void checkMatch(char searchTerm[], char toBeSearched[], bool& match) {
+void checkMatch(char searchTerm[], char toBeSearched[], bool& match) 
+{
 
 	int searchLength = strlen(searchTerm);
 	int stringLength = strlen(toBeSearched);
-	//int eolDist = stringLength;
 	int consecMatching;
 	//bool matchFound = false;
 
@@ -217,8 +232,6 @@ void checkMatch(char searchTerm[], char toBeSearched[], bool& match) {
 				if (LOGGING) std::cout << "Match found" << '\n';
 			}
 		}
-
-		//eolDist--;
 	}
 
 	return;
